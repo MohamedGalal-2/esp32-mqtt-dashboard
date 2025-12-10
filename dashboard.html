@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ESP32 MQTT Sensor Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #0f172a;
+      color: #e5e7eb;
+    }
+
+    h2 {
+      text-align: center;
+      margin-bottom: 10px;
+      font-family: "Trebuchet MS", "Segoe UI", sans-serif; /* choose any font stack */
+      font-size: 32px;                                     /* optional: bigger title */
+      letter-spacing: 1px;                                 /* optional: spacing */
+    }
+
+    #status {
+      text-align: center;
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr)); /* always 2 columns */
+      gap: 24px;                                       /* more space between cards */
+    }
+
+    /* Optional: on very small screens, stack to 1 column */
+    @media (max-width: 600px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: #020617;
+      border-radius: 14px;
+      padding: 22px 24px;      /* larger padding = bigger card */
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.45);
+      border: 1px solid #1f2937;
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+      cursor: default;
+    }
+
+    .card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .card-header img {
+      width: 64px;
+      height: 64px;
+      margin-right: 1px;
+    }
+
+    .card-header h3 {
+      margin: 0;
+      font-weight: 700;
+      font-size: 22px;
+    }
+
+    .value {
+      font-size: 30px;
+      font-weight: 700;
+      font-weight: bold;
+      margin: 4px 0;
+    }
+
+    .unit {
+      font-size: 16px;
+      color: #9ca3af;
+    }
+
+    .label {
+      font-size: 14px;
+      color: #9ca3af;
+    }
+
+    .ok {
+      color: #22c55e;
+    }
+
+    .warn {
+      color: #facc15;
+    }
+
+    .alarm {
+      color: #ef4444;
+    }
+  </style>
+</head>
+<body>
+  <h2>ESP32 Sensor Dashboard</h2>
+  <div id="status">Connecting...</div>
+
+  <div class="grid">
+    <!-- Temperature -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/temperature.png" alt="Temperature icon">
+        <h3>Temperature</h3>
+      </div>
+      <div class="value" id="temp">--</div>
+      <div class="unit">°C</div>
+    </div>
+
+    <!-- Humidity -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/humidity.png" alt="Humidity icon">
+        <h3>Humidity</h3>
+      </div>
+      <div class="value" id="hum">--</div>
+      <div class="unit">%</div>
+    </div>
+
+    <!-- Smoke -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/smoke.png" alt="Smoke icon">
+        <h3>Smoke (MQ-2)</h3>
+      </div>
+      <div class="value" id="smoke">--</div>
+      <div class="unit">V</div>
+    </div>
+
+    <!-- Flame -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/flame.png" alt="Flame icon">
+        <h3>Flame</h3>
+      </div>
+      <div class="value" id="flameV">--</div>
+      <div class="unit">Voltage</div>
+      <div class="label" id="flameStatus">--</div>
+    </div>
+
+    <!-- Vibration -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/vibration.png" alt="Vibration icon">
+        <h3>Vibration</h3>
+      </div>
+      <div class="value" id="vibration">--</div>
+    </div>
+
+    <!-- Touch -->
+    <div class="card">
+      <div class="card-header">
+        <img src="icons/touch.png" alt="Touch icon">
+        <h3>Touch</h3>
+      </div>
+      <div class="value" id="touch">--</div>
+    </div>
+  </div>
+
+  <!-- mqtt.js from CDN -->
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+
+  <script>
+    // ---- HiveMQ Cloud WebSocket config ----
+    const host = "4ef92ef829e049469f01c24500784cfb.s1.eu.hivemq.cloud";
+    const port = 8884; // WebSocket TLS port
+    const clientId = "webClient_" + Math.random().toString(16).substr(2, 8);
+    const username = "galal";
+    const password = "Galal2222";
+
+    const connectUrl = `wss://${host}:${port}/mqtt`; // HiveMQ Cloud WS path
+
+    const client = mqtt.connect(connectUrl, {
+      clientId,
+      username,
+      password,
+      clean: true,
+      connectTimeout: 4000,
+      reconnectPeriod: 1000
+    });
+
+    const statusEl = document.getElementById("status");
+
+    client.on("connect", () => {
+      statusEl.textContent = "Connected";
+      statusEl.className = "ok";
+      client.subscribe("esp32/sensors/#", (err) => {
+        if (err) {
+          statusEl.textContent = "Subscribe error";
+          statusEl.className = "alarm";
+        }
+      });
+    });
+
+    client.on("reconnect", () => {
+      statusEl.textContent = "Reconnecting...";
+      statusEl.className = "warn";
+    });
+
+    client.on("error", (err) => {
+      console.error("Connection error: ", err);
+      statusEl.textContent = "Connection error";
+      statusEl.className = "alarm";
+    });
+
+    client.on("close", () => {
+      statusEl.textContent = "Disconnected";
+      statusEl.className = "alarm";
+    });
+
+    client.on("message", (topic, payload) => {
+      const msg = payload.toString();
+      console.log(topic, msg);
+
+      switch (topic) {
+        // Temperature
+        case "esp32/sensors/temperature": {
+          const el = document.getElementById("temp");
+          el.textContent = msg === "null" ? "--" : msg;
+          const t = parseFloat(msg);
+          if (!isNaN(t)) {
+            if (t >= 30) el.className = "value alarm";
+            else if (t >= 25) el.className = "value warn";
+            else el.className = "value ok";
+          }
+          break;
+        }
+
+        // Humidity
+        case "esp32/sensors/humidity": {
+          const el = document.getElementById("hum");
+          el.textContent = msg === "null" ? "--" : msg;
+          const h = parseFloat(msg);
+          if (!isNaN(h)) {
+            if (h <= 20 || h >= 80) el.className = "value alarm";
+            else if (h <= 30 || h >= 70) el.className = "value warn";
+            else el.className = "value ok";
+          }
+          break;
+        }
+
+        // Smoke (MQ‑2 voltage)
+        case "esp32/sensors/smoke": {
+          const smokeEl = document.getElementById("smoke");
+          smokeEl.textContent = msg;
+          const v = parseFloat(msg);
+          smokeEl.className = !isNaN(v) && v > 1.0 ? "value alarm" : "value ok";
+          break;
+        }
+
+        // Flame voltage
+        case "esp32/sensors/flameVoltage": {
+          const el = document.getElementById("flameV");
+          el.textContent = msg;
+          const fv = parseFloat(msg);
+          if (!isNaN(fv)) {
+            // Lower voltage means stronger flame on many modules
+            if (fv < 0.5) el.className = "value alarm";
+            else el.className = "value ok";
+          }
+          break;
+        }
+
+        // Flame detected flag
+        case "esp32/sensors/flameDetected": {
+          const flameStatusEl = document.getElementById("flameStatus");
+          if (msg === "1") {
+            flameStatusEl.textContent = "Flame detected";
+            flameStatusEl.className = "label alarm";
+          } else {
+            flameStatusEl.textContent = "No flame";
+            flameStatusEl.className = "label ok";
+          }
+          break;
+        }
+
+        // Vibration (string message)
+        case "esp32/sensors/vibration": {
+          const el = document.getElementById("vibration");
+          el.textContent = msg;
+          el.className = msg.toLowerCase().includes("no")
+            ? "value ok"
+            : "value alarm";
+          break;
+        }
+
+        // Touch
+        case "esp32/sensors/touched": {
+          const el = document.getElementById("touch");
+          if (msg === "1") {
+            el.textContent = "Touched";
+            el.className = "value warn"; // or alarm if you want
+          } else {
+            el.textContent = "Not touched";
+            el.className = "value ok";
+          }
+          break;
+        }
+
+        // Optional JSON payload topic
+        case "esp32/sensors": {
+          try {
+            const data = JSON.parse(msg);
+
+            if (data.temperature != null) {
+              const el = document.getElementById("temp");
+              el.textContent = data.temperature;
+            }
+
+            if (data.humidity != null) {
+              const el = document.getElementById("hum");
+              el.textContent = data.humidity;
+            }
+
+            if (data.smoke != null) {
+              const smokeEl = document.getElementById("smoke");
+              smokeEl.textContent = data.smoke;
+            }
+
+            if (data.flameVoltage != null) {
+              document.getElementById("flameV").textContent = data.flameVoltage;
+            }
+
+            if (data.flameDetected != null) {
+              const flameStatusEl2 = document.getElementById("flameStatus");
+              if (data.flameDetected) {
+                flameStatusEl2.textContent = "Flame detected";
+                flameStatusEl2.className = "label alarm";
+              } else {
+                flameStatusEl2.textContent = "No flame";
+                flameStatusEl2.className = "label ok";
+              }
+            }
+
+            if (data.vibration != null) {
+              document.getElementById("vibration").textContent = data.vibration;
+            }
+
+            if (data.touched != null) {
+              const el = document.getElementById("touch");
+              if (data.touched) {
+                el.textContent = "Touched";
+                el.className = "value warn";
+              } else {
+                el.textContent = "Not touched";
+                el.className = "value ok";
+              }
+            }
+          } catch (e) {
+            console.error("JSON parse error", e);
+          }
+          break;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
